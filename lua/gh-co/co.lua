@@ -19,8 +19,10 @@ local function buildEscapedPattern(rawPattern)
   -- Replace placeholder with pattern that matches any path including /
   escaped = string.gsub(escaped, "__DOUBLESTAR__", ".*")
 
-  -- Special handling for **/name patterns - they should match directories
-  if string.match(rawPattern, "%*%*/[^/]+$") then
+  -- Special handling for **/name patterns - they should match directories.
+  -- Exclude **/* (trailing segment is a literal "*", not a directory name) -
+  -- that's a glob wildcard and must not get the directory-only trailing slash.
+  if string.match(rawPattern, "%*%*/[^/*]+$") then
     -- **/logs should match files within logs directories
     escaped = escaped .. "/"
   end
@@ -38,13 +40,42 @@ local function buildEscapedPattern(rawPattern)
   return escaped
 end
 
+-- `**` means "zero or more path segments" in gitignore/minimatch glob syntax
+-- (e.g. `a/**/b` must match `a/b` too). buildEscapedPattern always keeps both
+-- slashes flanking the `.*` it substitutes for `**` as literal, mandatory
+-- characters, so it can only represent the "one or more segments" case - two
+-- literal slashes can never be adjacent in a real file path. This derives the
+-- zero-segment variant of an already-built pattern by dropping the flanking
+-- slash that would otherwise vanish, so callers can try both.
+local function buildZeroSegmentVariant(escaped)
+  if string.match(escaped, "^%.%*/") then
+    return (string.gsub(escaped, "^%.%*/", "", 1))
+  end
+
+  local collapsed, replacements = string.gsub(escaped, "/%.%*/", "/", 1)
+  if replacements > 0 then
+    return collapsed
+  end
+
+  return nil
+end
+
 -- matches file path substrings
 local function isMatch(filePath, pathPattern)
   if pathPattern == nil or pathPattern == "" then return false end
   if isComment(pathPattern) then return false end
 
   local pattern = buildEscapedPattern(pathPattern)
-  return string.match(filePath, pattern) ~= nil
+  if string.match(filePath, pattern) ~= nil then return true end
+
+  if string.find(pathPattern, "**", 1, true) then
+    local zeroSegmentPattern = buildZeroSegmentVariant(pattern)
+    if zeroSegmentPattern ~= nil then
+      return string.match(filePath, zeroSegmentPattern) ~= nil
+    end
+  end
+
+  return false
 end
 
 -- Detects `*` pattern (global match - only exact "*")

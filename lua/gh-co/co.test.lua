@@ -267,8 +267,33 @@ function TestCO:testDoubleStarLogsPattern() -- luacheck: ignore 212
     end
   end
 
-  local result = CO.matchFilesToCodeowner({"build/logs/error.log", "app/server/logs/access.log", "logs/debug.log"})
-  lu.assertEquals(result, {"@octocat"})
+  -- Assert each file individually - matchFilesToCodeowner aggregates owners
+  -- across all inputs, so asserting only the combined result would still pass
+  -- even if one of these files silently failed to match on its own.
+  lu.assertEquals(CO.matchFilesToCodeowner({"build/logs/error.log"}), {"@octocat"})
+  lu.assertEquals(CO.matchFilesToCodeowner({"app/server/logs/access.log"}), {"@octocat"})
+  lu.assertEquals(CO.matchFilesToCodeowner({"logs/debug.log"}), {"@octocat"})
+end
+
+function TestCO:testDoubleStarWildcardPattern() -- luacheck: ignore 212
+  -- Test dir/**/* pattern matches files directly inside dir, not just in subdirectories
+  self.FS.openCodeownersFileAsLines = function()
+    local lines = {"components/widget/**/* @widget-owner"}
+    local i = 0
+    return function()
+      i = i + 1
+      return lines[i]
+    end
+  end
+
+  lu.assertEquals(
+    CO.matchFilesToCodeowner({"components/widget/widget.tsx"}),
+    {"@widget-owner"}
+  )
+  lu.assertEquals(
+    CO.matchFilesToCodeowner({"components/widget/buttons/toggle.tsx"}),
+    {"@widget-owner"}
+  )
 end
 
 function TestCO:testAppsWithEmptyGithubSubdirectory() -- luacheck: ignore 212
